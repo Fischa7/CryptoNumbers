@@ -16,8 +16,15 @@ contract CryptoNumbers is Ownable, ERC721Token("CryptoNumbers","CN") {
         price = _price;
     }
     
+    /// mints a new number. Each number can only be minted once.
     function mint(uint256 numId) public payable {
         require(msg.value >= price);
         _mint(msg.sender, numId);
+
+        // in case the user send to much money, send the rest of it back
+        if (msg.value > price) {
+            uint256 excess = msg.value.sub(price);
+            msg.sender.transfer(excess);
+        }
     }
 }
