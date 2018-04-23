@@ -14,7 +14,7 @@ contract CryptoNumbers is Ownable, ERC721Token("CryptoNumbers","CN") {
     }
 
     // initial price for minting a new number
-    uint256 internal price = 1 finney;
+    uint256 internal price = 1 szabo;
     uint256 internal addFee = 1 finney;
 
     // for later implementation of auctioning the numbers
