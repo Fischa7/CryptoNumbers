@@ -1,4 +1,4 @@
-pragma solidity ^0.4.18;
+pragma solidity ^0.4.22;
 
 import "../node_modules/zeppelin-solidity/contracts/token/ERC721/ERC721Token.sol";
 import "../node_modules/zeppelin-solidity/contracts/ownership/Ownable.sol";
@@ -71,90 +71,134 @@ contract CryptoNumbers is Ownable, ERC721Token("CryptoNumbers","CN") {
     }
 }
 
-contract ClockAuctionBase {
+contract NumberSaleBase {
     
     using SafeMath for uint256; 
 
-    struct Auction {
+    struct Sale {
         // seller of the number
         address seller;
         // price set from the seller
         uint128 price;
-        // Time when auction started
-        // NOTE: 0 if this auction has been concluded
+        // Time when sale started
+        // NOTE: 0 if this sale has been concluded
         uint64 startedAt;
     }
 
     ERC721Token public nfContract;
     uint256 public ownerCut;
 
-    mapping (uint256 => Auction) tokenIdToAuction;
+    mapping (uint256 => Sale) tokenIdToSale;
 
-    event AuctionCreated(uint256 tokenId, uint256 price);
-    event AuctionSuccessful(uint256 tokenId, uint256 price, address buyer);
-    event AuctionCancelled(uint256 tokenId);
+    event SaleCreated(uint256 tokenId, uint256 price);
+    event SaleSuccessful(uint256 tokenId, uint256 price, address buyer);
+    event SaleCancelled(uint256 tokenId);
 
+    // checks wether or not the user actually owns the token
     function _owns(address _claimant, uint256 _tokenId) internal view returns (bool) {
         return (nfContract.ownerOf(_tokenId) == _claimant);
     }
 
+    // transfers token to the contract
     function _escrow(address _owner, uint256 _tokenId) internal {
         nfContract.transferFrom(_owner, this, _tokenId);
     }
 
+    // transfers token to _receiver
     function _transfer(address _receiver, uint256 _tokenId) internal {
         nfContract.transferFrom(this, _receiver, _tokenId);
     }
 
-    function _removeAuction(uint256 _tokenId) internal {
-        delete tokenIdToAuction[_tokenId];
+    // removes sale from mapping
+    function _removeSale(uint256 _tokenId) internal {
+        delete tokenIdToSale[_tokenId];
     }
     
-    function _isOnAuction(Auction storage _auction) internal view returns(bool) {
-        return(_auction.startedAt > 0);
+    // checks if is on sale
+    function _isOnSale(Sale storage _sale) internal view returns(bool) {
+        return(_sale.startedAt > 0);
     }
 
-    function _addAuction(uint256 _tokenId, Auction _auction) internal {
-        tokenIdToAuction[_tokenId] = _auction;
+    // adds a new sale for the specified token
+    function _addSale(uint256 _tokenId, Sale _sale) internal {
+        tokenIdToSale[_tokenId] = _sale;
 
-        emit AuctionCreated(
+        emit SaleCreated(
             uint256(_tokenId),
-            uint256(_auction.price)
+            uint256(_sale.price)
         );
     }
 
-    function _cancelAuction(uint256 _tokenId, address _seller) internal {
-        _removeAuction(_tokenId);
+    // cancels an existing sale
+    function _cancelSale(uint256 _tokenId, address _seller) internal {
+        _removeSale(_tokenId);
         _transfer(_seller, _tokenId);
-        emit AuctionCancelled(_tokenId);
+        emit SaleCancelled(_tokenId);
     }
 
+    // transfers money, does NOT transfer token yet.
     function _buy(uint256 _tokenId, uint256 _amount) internal returns(uint256) {
-        Auction storage auction = tokenIdToAuction[_tokenId];
+        Sale storage sale = tokenIdToSale[_tokenId];
         
-        require(_isOnAuction(auction));
+        require(_isOnSale(sale));
         
-        require(_amount >= auction.price);
+        require(_amount >= sale.price);
 
-        address seller = auction.seller;
+        address seller = sale.seller;
 
-        _removeAuction(_tokenId);
+        _removeSale(_tokenId);
 
-        if (auction.price > 0) {
-            uint256 auctioneerCut = _computeCut(auction.price);
-            uint256 sellerProceeds = auction.price - auctioneerCut;
+        if (sale.price > 0) {
+            uint256 auctioneerCut = _computeCut(sale.price);
+            uint256 sellerProceeds = sale.price - auctioneerCut;
 
             seller.transfer(sellerProceeds);
         }
 
-        uint256 bidExcess = _amount - auction.price;
+        uint256 bidExcess = _amount - sale.price;
         msg.sender.transfer(bidExcess);
 
-        emit AuctionSuccessful(_tokenId, auction.price, msg.sender);
-        return auction.price;
+        emit SaleSuccessful(_tokenId, sale.price, msg.sender);
+        return sale.price;
     }
 
+    // calculates the cut from the price
     function _computeCut(uint256 _price) internal view returns(uint256) {
         return _price.mul(ownerCut).div(1000);
     }
+}
+
+contract NumberSale is NumberSaleBase, Ownable {
+    
+    constructor(address _nftAddress, uint256 _cut) public {
+        require(_cut <= 1000);
+        ownerCut = _cut;
+        nfContract = ERC721Token(_nftAddress);
+    }
+
+    function withdrawBalance() external {
+        address nftAddress = address(nfContract);
+
+        require(msg.sender == owner || msg.sender == nftAddress);
+        bool res = nftAddress.send(this.balance);
+    }
+
+    function createSale(
+        uint256 _tokenId,
+        uint256 _price,
+        address _seller
+    )
+    external {
+        // check that there are no overflows
+        require(_price == uint256(uint128(_price)));
+        require(_owns(msg.sender,_tokenId));
+        _escrow(msg.sender, _tokenId);
+        Sale memory sale = Sale(
+            _seller,
+            uint128(_price),
+            uint64(now)
+        );
+        _addSale(_tokenId, sale);
+    }
+
 }
